@@ -1,4 +1,8 @@
 #!/bin/perl
+#
+# (c) 2008 Máté FARKAS, GPL v3.0 license.
+#     2026 Luis Rivera, up.edu.mx for bug fixes and improvements.
+#
 use warnings;
 use strict;
 #use diagnostics;
