@@ -11,47 +11,43 @@ binmode STDERR, ':encoding(UTF-8)';
 
 # ------------------------------------------------------------
 # Command-line options
+#
+# Default: compact ANSI
+# --iso:    ISO 105
+# --ansi:   extended ANSI 104
+# --cool:   Keycool 84
 # ------------------------------------------------------------
 
-my ($ansi, $cool);
+Getopt::Long::Configure('no_auto_abbrev');
+
+my ($opt_iso, $opt_ansi, $opt_cool);
 
 GetOptions(
-    'ansi' => \$ansi,
-    'cool' => \$cool,
-) or die "Usage: perl pkl2kle.pl [--ansi | --cool] input.pkl [output.json]\n";
+    'iso'  => \$opt_iso,
+    'ansi' => \$opt_ansi,
+    'cool' => \$opt_cool,
+) or die "Usage: perl pkl2kle.pl [--iso | --ansi | --cool] input.pkl [output.json]\n";
 
-die "Options --ansi and --cool are mutually exclusive\n"
-    if $ansi && $cool;
+my $selected = ($opt_iso || 0) + ($opt_ansi || 0) + ($opt_cool || 0);
+
+die "Choose only one keyboard option\n"
+    if $selected > 1;
 
 my $keyboard =
-    $cool ? 'cool' :
-    $ansi ? 'ansi' :
-            'iso';
+    $opt_iso  ? 'iso'  :
+    $opt_ansi ? 'ansi' :
+    $opt_cool ? 'cool' :
+                'compact';
 
 my %keyboard_name = (
-    iso  => 'ISO 105',
-    ansi => 'ANSI 104',
-    cool => 'Keycool 84',
+    compact => 'Compact ANSI',
+    iso     => 'ISO 105',
+    ansi    => 'ANSI 104',
+    cool    => 'Keycool 84',
 );
 
-sub add_iso_enter {
-
-    my ($row, $sc, $fallback) = @_;
-
-    push @$row, {
-        x  => 0.25,
-        w  => 1.25,
-        h  => 2,
-        w2 => 1.5,
-        h2 => 1,
-        x2 => -0.25,
-    };
-
-    push @$row, key_label($sc, $fallback);
-}
-
 my $input = shift @ARGV
-    or die "Usage: perl pkl2kle.pl [--ansi | --cool] input.pkl [output.json]\n";
+    or die "Usage: perl pkl2kle.pl [--iso | --ansi | --cool] input.pkl [output.json]\n";
 
 my $output = shift @ARGV;
 
@@ -126,25 +122,20 @@ while (my $line = <$fh>) {
         # Preserve empty tab-separated fields.
         my @field = split /\t/, $rhs, -1;
 
+        # Trim spaces, not tabs.
+        s/^ +| +$//g for @field;
+
         my $expected = 2 + @shiftstates;
 
         die "Too few fields for $sc: "
             . scalar(@field) . " (expected at least $expected)\n"
             if @field < $expected;
 
-        # Caps and CapsSh are an optional pair.
-        # Any additional fields are trailing comments.
-        my $has_caps = @field >= $expected + 2;
-
-        my $data_count = $has_caps
-            ? $expected + 2
-            : $expected;
-
-        splice @field, $data_count
-            if @field > $data_count;
-
-        # Trim spaces, not tabs.
-        s/^ +| +$//g for @field;
+        # Optional Caps and CapsSh fields.
+        # A field beginning with ';' is a trailing comment.
+        my $has_caps =
+            @field >= $expected + 2
+            && $field[$expected] !~ /^\s*;/;
 
         my ($vk, $capstat, @values) =
             @field[0 .. $expected - 1];
@@ -176,7 +167,6 @@ while (my $line = <$fh>) {
 
             my ($key, $value) = ($1, $2);
 
-            # Strip optional comment.
             $value =~ s/\s+;.*$//;
 
             $deadkeys{$section}{$key} = $value;
@@ -201,17 +191,14 @@ sub display_value {
 
     return '' if !defined $value || $value eq '--';
 
-    # Dead-key marker.
     if ($value =~ /^dk(\d+)$/i) {
         return "DK$1";
     }
 
-    # PKL special-key notation.
     if ($value =~ /^=?\{(.+)\}$/) {
         return $1;
     }
 
-    # Control characters.
     my %control = (
         "\x1b" => 'ESC',
         "\x1c" => 'FS',
@@ -223,7 +210,6 @@ sub display_value {
 
     return $control{$value} if exists $control{$value};
 
-    # Do not attempt to render other control characters.
     return '' if $value =~ /[\x00-\x1f\x7f]/;
 
     return $value;
@@ -248,10 +234,10 @@ sub key_label {
     my $states = $layout{$sc}{states};
 
     my @legend = (
-        display_value($states->{1}),  # Shift
-        display_value($states->{0}),  # Normal
-        display_value($states->{7}),  # Shift+AltGr
-        display_value($states->{6}),  # AltGr
+        display_value($states->{1}),
+        display_value($states->{0}),
+        display_value($states->{7}),
+        display_value($states->{6}),
     );
 
     return $fallback unless grep { length } @legend;
@@ -260,7 +246,7 @@ sub key_label {
 }
 
 # ------------------------------------------------------------
-# Add a key to a KLE row.
+# Add a PKL-mapped key to a KLE row.
 # ------------------------------------------------------------
 
 sub add_key {
@@ -280,7 +266,7 @@ sub add_key {
     push @$row, key_label($sc, $fallback);
 }
 
-# Add a key with a fixed physical legend.
+# Add a fixed-label key.
 sub add_fixed_key {
 
     my ($row, $label, $width, $height) = @_;
@@ -298,7 +284,7 @@ sub add_fixed_key {
     push @$row, $label;
 }
 
-# KLE legend alignment.
+# Add a KLE alignment property.
 sub align {
 
     my ($row, $alignment) = @_;
@@ -314,8 +300,159 @@ sub gap {
     push @$row, { x => $width };
 }
 
+# ISO Enter: composite, two-row key.
+=begin comment 
+sub add_iso_enter {
+
+    my ($row, $sc, $fallback) = @_;
+
+    push @$row, {
+        x  => 0.25,
+        w  => 1.25,
+        h  => 2,
+        w2 => 1.5,
+        h2 => 1,
+        x2 => -0.25,
+        y2 => 1,
+    };
+
+    push @$row, key_label($sc, $fallback);
+}
+=end comment
+=cut 
+
+sub add_iso_enter {
+
+    my ($row, $sc, $fallback) = @_;
+
+    push @$row, {
+        x  => 0.25,
+        w  => 1.25,
+        h  => 2,
+        w2 => 1.5,
+        h2 => 1,
+        x2 => -0.25,
+        # y2 => 1,
+    };
+
+    push @$row, key_label($sc, $fallback);
+}
 # ------------------------------------------------------------
-# ISO 105 / ANSI 104 geometry
+# Compact ANSI geometry (~61 keys)
+# ------------------------------------------------------------
+
+sub build_compact_ansi {
+
+    my @rows;
+
+    # --------------------------------------------------------
+    # Number row
+    # --------------------------------------------------------
+
+    {
+        my @r;
+
+        add_key(\@r, 'SC029', '`');
+
+        for my $sc (qw(
+            SC002 SC003 SC004 SC005 SC006 SC007
+            SC008 SC009 SC00A SC00B SC00C SC00D
+        )) {
+            add_key(\@r, $sc, '');
+        }
+
+        add_key(\@r, 'SC00E', 'Backspace', 2);
+
+        push @rows, \@r;
+    }
+
+    # --------------------------------------------------------
+    # QWERTY row
+    # --------------------------------------------------------
+
+    {
+        my @r;
+
+        add_key(\@r, 'SC00F', 'Tab', 1.5);
+
+        for my $sc (qw(
+            SC010 SC011 SC012 SC013 SC014 SC015
+            SC016 SC017 SC018 SC019 SC01A SC01B
+        )) {
+            add_key(\@r, $sc, '');
+        }
+
+        add_key(\@r, 'SC02B', '\\', 1.5);
+
+        push @rows, \@r;
+    }
+
+    # --------------------------------------------------------
+    # Home row
+    # --------------------------------------------------------
+
+    {
+        my @r;
+
+        add_key(\@r, 'SC03A', 'Caps', 1.75);
+
+        for my $sc (qw(
+            SC01E SC01F SC020 SC021 SC022
+            SC023 SC024 SC025 SC026 SC027 SC028
+        )) {
+            add_key(\@r, $sc, '');
+        }
+
+        add_key(\@r, 'SC01C', 'Enter', 2.25);
+
+        push @rows, \@r;
+    }
+
+    # --------------------------------------------------------
+    # Bottom letter row
+    # --------------------------------------------------------
+
+    {
+        my @r;
+
+        add_key(\@r, 'SC02A', 'Shift', 2.25);
+
+        for my $sc (qw(
+            SC02C SC02D SC02E SC02F SC030
+            SC031 SC032 SC033 SC034 SC035
+        )) {
+            add_key(\@r, $sc, '');
+        }
+
+        add_key(\@r, 'SC036', 'Shift', 2.75);
+
+        push @rows, \@r;
+    }
+
+    # --------------------------------------------------------
+    # Spacebar row
+    # --------------------------------------------------------
+
+    {
+        my @r;
+
+        add_key(\@r, 'SC01D', 'Ctrl', 1.25);
+        add_key(\@r, 'SC15B', 'Win', 1.25);
+        add_key(\@r, 'SC038', 'Alt', 1.25);
+        add_key(\@r, 'SC039', 'Space', 6.25);
+        add_key(\@r, 'SC138', 'AltGr', 1.25);
+        add_key(\@r, 'SC15C', 'Win', 1.25);
+        add_key(\@r, 'SC15D', 'Menu', 1.25);
+        add_key(\@r, 'SC11D', 'Ctrl', 1.25);
+
+        push @rows, \@r;
+    }
+
+    return @rows;
+}
+
+# ------------------------------------------------------------
+# Extended ANSI 104 / ISO 105 geometry
 # ------------------------------------------------------------
 
 sub build_fullsize {
@@ -407,8 +544,6 @@ sub build_fullsize {
             add_key(\@r, $sc, '');
         }
 
-        # add_key(\@r, 'SC02B', '\\', 1.5); # iso geometry was identical to ansi
-
         if ($iso) {
             add_iso_enter(\@r, 'SC01C', 'Enter');
         }
@@ -447,10 +582,6 @@ sub build_fullsize {
         )) {
             add_key(\@r, $sc, '');
         }
-
-        # add_key(\@r, 'SC01C', 'Enter', 2.25); # fix to compensate for iso
-        #
-        # gap(\@r, 0.75);
 
         if ($iso) {
             add_key(\@r, 'SC02B', '\\');
@@ -739,11 +870,17 @@ sub build_cool {
 
 my @rows;
 
-if ($keyboard eq 'cool') {
+if ($keyboard eq 'compact') {
+    @rows = build_compact_ansi();
+}
+elsif ($keyboard eq 'cool') {
     @rows = build_cool();
 }
+elsif ($keyboard eq 'iso') {
+    @rows = build_fullsize(1);
+}
 else {
-    @rows = build_fullsize($keyboard eq 'iso');
+    @rows = build_fullsize(0);
 }
 
 # ------------------------------------------------------------
