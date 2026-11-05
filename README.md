@@ -4,7 +4,7 @@ An assortment of custom keyboard layouts, in Microsoft Keyboard Layout Creator s
 
 The [Texas 1858](kbdusxtx.klc) keyboard layout, roughly based on US International without dead keys, shows a sample keyboard layout after the full conversion process:
 
-![Texas 1858 Keyboard Layout](austin-texas-1858-keyboard-layout.png)
+![Texas 1858 Keyboard Layout](texas1858.png)
 
 To grasp the reason for this unusual keyboard layout name, you may read [its historical justification](texas1858.md).
 
